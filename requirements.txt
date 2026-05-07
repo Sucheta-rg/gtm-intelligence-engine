@@ -1,0 +1,7 @@
+feedparser
+requests
+groq
+apscheduler
+streamlit
+hubspot-api-client
+python-dotenv
