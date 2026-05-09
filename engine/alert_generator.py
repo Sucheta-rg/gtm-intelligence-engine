@@ -16,8 +16,8 @@ client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
 def generate_email(prospect, signal):
     """Generates a personalized email draft for the rep."""
-    prompt = f"""You are a B2B sales expert writing on behalf of LevaData — 
-an AI-powered direct materials sourcing platform.
+    prompt = f"""You are a B2B sales expert writing on behalf of a 
+B2B SaaS company that helps manufacturers optimize direct materials sourcing.
 
 Write a short, personalized outreach email to a procurement leader at {prospect['company']}.
 
@@ -31,7 +31,7 @@ Context:
 Rules:
 - Max 4 sentences
 - Lead with the external signal as context
-- Position LevaData as a solution — not a pitch
+- Position our solution as genuinely helpful — not a pitch
 - Sound human — not AI generated
 - No subject line needed
 
