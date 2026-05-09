@@ -1,9 +1,13 @@
 """
 run_engine.py — Master Orchestrator
 GTM Intelligence Engine v1.0
-Fetches all prospects automatically from HubSpot.
-Matches signals to prospects by material keywords.
-No hardcoding — fully dynamic.
+
+Phase 1 complete:
+- Deduplication — no repeat alerts same day
+- Date stamps on all alerts
+- 90 day cleanup
+- Past alert summary when no new signals
+- Pipeline stage based personalisation
 """
 
 import sys
@@ -18,15 +22,16 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.signal_collector import run as collect_signals
 from engine.alert_generator import generate_alert
-from engine.alert_delivery import deliver_alerts
-from engine.brain import setup_database, save_signal, save_alert
+from engine.alert_delivery import deliver_alerts, deliver_past_alerts
+from engine.brain import (
+    setup_database, save_signal, save_alert,
+    already_alerted_today, get_past_alerts, cleanup_old_alerts
+)
 
 HUBSPOT_KEY = os.environ.get("HUBSPOT_API_KEY")
 
 PROPERTY_FIELDS = ["name", "key_materials", "sourcing_regions", "hs_lead_status"]
 
-# Maps signal types to material keywords
-# This is the engine's internal intelligence — never changes
 SIGNAL_MATERIAL_MAP = {
     "commodity_shock": [
         "copper", "steel", "aluminum", "tin", "resin",
@@ -47,11 +52,7 @@ SIGNAL_MATERIAL_MAP = {
 
 
 def get_prospects_from_hubspot():
-    """
-    Fetches ALL companies from HubSpot automatically.
-    Rep adds any company to HubSpot — engine picks it up next run.
-    Company materials come from HubSpot — nothing hardcoded here.
-    """
+    """Fetches ALL companies from HubSpot automatically."""
     if not HUBSPOT_KEY:
         print("[Engine] No HubSpot API key found in .env")
         return []
@@ -89,11 +90,7 @@ def get_prospects_from_hubspot():
 
 
 def match_prospects_to_signals(signals, prospects):
-    """
-    Matches validated signals to prospects using material keywords.
-    Reads materials from HubSpot — no hardcoding needed.
-    New companies added to HubSpot are automatically matched.
-    """
+    """Matches signals to prospects by material keywords."""
     matched = []
     for signal in signals:
         signal_type = signal["signal_type"]
@@ -120,21 +117,27 @@ def header():
 
 
 def run_pipeline():
-    """Runs the full GTM engine pipeline end to end."""
     header()
 
+    # Step 1 — Setup and cleanup
     print("\n[1/5] Setting up database...")
     setup_database()
+    cleanup_old_alerts(days=90)
 
+    # Step 2 — Collect signals
     print("\n[2/5] Running signal collection...")
     validated_signals = collect_signals()
 
     if not validated_signals:
-        print("\n[Engine] No validated signals today. Pipeline complete.")
+        print("\n[Engine] No new validated signals today.")
+        print("[Engine] Showing past alerts from last 90 days...\n")
+        past_alerts = get_past_alerts(days=90)
+        deliver_past_alerts(past_alerts)
         return
 
     print(f"\n[Engine] {len(validated_signals)} signal(s) passed validation gate")
 
+    # Step 3 — Load prospects from HubSpot
     print("\n[3/5] Fetching prospects from HubSpot automatically...")
     prospects = get_prospects_from_hubspot()
 
@@ -142,45 +145,78 @@ def run_pipeline():
         print("[Engine] No prospects loaded — check HubSpot connection.")
         return
 
-    print(f"[Engine] Matching {len(prospects)} prospects against signals by material...")
+    print(f"[Engine] Matching {len(prospects)} prospects against signals...")
     matches = match_prospects_to_signals(validated_signals, prospects)
     print(f"[Engine] {len(matches)} prospect(s) affected by today's signals")
 
     if not matches:
-        print("[Engine] No material matches found — check key_materials in HubSpot.")
+        print("[Engine] No material matches found.")
         return
 
+    # Step 4 — Generate alerts with deduplication
     print("\n[4/5] Generating personalized alerts with Groq AI...")
     alerts = []
+    skipped = 0
+
     for match in matches:
-        alert = generate_alert(match["prospect"], match["signal"])
+        prospect = match["prospect"]
+        signal = match["signal"]
+
+        # Deduplication check
+        if already_alerted_today(
+            prospect["company"],
+            signal["signal_type"],
+            signal["keyword"]
+        ):
+            skipped += 1
+            print(f"[Engine] Skipped — already alerted today: "
+                  f"{prospect['company']} + {signal['keyword']}")
+            continue
+
+        alert = generate_alert(prospect, signal)
+
         signal_id = save_signal(
-            signal_type=match["signal"]["signal_type"],
-            headline=match["signal"]["headline"],
-            source=", ".join(match["signal"]["sources"]),
-            keyword=match["signal"]["keyword"],
-            sources_count=match["signal"]["sources_count"],
-            validated=1
+            signal_type=signal["signal_type"],
+            headline=signal["headline"],
+            source=", ".join(signal["sources"]),
+            keyword=signal["keyword"],
+            sources_count=signal["sources_count"],
+            validated=1,
+            severity="high" if signal["sources_count"] >= 4 else "medium"
         )
+
         save_alert(
-            prospect_id=match["prospect"]["id"],
+            prospect_id=prospect["id"],
             signal_id=signal_id,
+            company=prospect["company"],
+            signal_type=signal["signal_type"],
+            keyword=signal["keyword"],
             email_draft=alert["email_draft"],
             talking_point=alert["talking_point"],
-            insight=alert["insight"]
+            insight=alert["insight"],
+            pipeline_stage=prospect.get("pipeline_stage", "cold")
         )
+
         alerts.append(alert)
 
+    if skipped > 0:
+        print(f"[Engine] {skipped} duplicate alert(s) skipped")
+
+    # Step 5 — Deliver alerts
     print("\n[5/5] Delivering alerts...")
     deliver_alerts(alerts)
 
+    # Summary
     print("\n" + "="*65)
     print(f"  PIPELINE COMPLETE")
+    print(f"  Run date          : {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print(f"  Signals validated : {len(validated_signals)}")
     print(f"  Prospects matched : {len(matches)}")
     print(f"  Alerts fired      : {len(alerts)}")
+    print(f"  Duplicates skipped: {skipped}")
     print(f"  Saved to database : Yes")
-    print(f"  Next run          : Scheduled every 6 hours")
+    print(f"  HubSpot updated   : Yes")
+    print(f"  Next run          : Every 6 hours via scheduler")
     print("="*65 + "\n")
 
 
