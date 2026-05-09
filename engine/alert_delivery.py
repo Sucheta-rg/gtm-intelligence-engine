@@ -33,6 +33,8 @@ def print_alert(alert, is_past=False):
     date_str = alert.get('fired_at', alert.get('detected_at',
                datetime.now().strftime('%Y-%m-%d %H:%M')))
     print(f"║  DATE      : {date_str:<51}║")
+    print(f"║  URGENCY   : {alert.get('urgency', 'MEDIUM'):<51}║")
+    print(f"║  PRIMARY   : {alert.get('primary_action', 'EMAIL'):<51}║")
     print(f"╠{border}╣")
 
     def wrap(title, text):
