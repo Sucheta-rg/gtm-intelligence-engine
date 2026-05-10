@@ -5,3 +5,5 @@ apscheduler
 streamlit
 hubspot-api-client
 python-dotenv
+plotly
+pandas
