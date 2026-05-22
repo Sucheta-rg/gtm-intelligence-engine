@@ -35,7 +35,7 @@ Human does the persuasion.**
 ## Built For
 
 B2B SaaS sales teams selling into manufacturing.
-Proof of concept: LevaData — AI-powered supply 
+Proof of concept: AI-powered supply 
 chain sourcing platform.
 
 ---
